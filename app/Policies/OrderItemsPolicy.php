@@ -1,0 +1,75 @@
+<?php
+
+namespace App\Policies;
+
+use App\Models\OrderItems;
+use App\Models\Orders;
+use App\Models\User;
+use Illuminate\Auth\Access\Response;
+
+class OrderItemsPolicy
+{
+    /**
+     * Determine whether the user can view any models.
+     */
+    public function viewAny(User $user): bool
+    {
+        return false;
+    }
+
+    /**
+     * Determine whether the user can view the model.
+     */
+    public function view(User $user, OrderItems $orderitems): bool
+    {
+        return false;
+    }
+
+    /**
+     * Determine whether the user can create models.
+     */
+    public function create(User $user): bool
+    {
+        return false;
+    }
+
+    /**
+     * Determine whether the user can update the model.
+     */
+    public function update(User $user, OrderItems $orderItems): bool
+    {
+        return false;
+    }
+
+    /**
+     * Determine whether the user can delete the model.
+     */
+    public function delete(User $user, OrderItems $orderItems): bool
+    {
+        return false;
+    }
+
+    /**
+     * Determine whether the user can restore the model.
+     */
+    public function restore(User $user, OrderItems $orderItems): bool
+    {
+        return false;
+    }
+
+    /**
+     * Determine whether the user can permanently delete the model.
+     */
+    public function forceDelete(User $user, OrderItems $orderItems): bool
+    {
+        return false;
+    }
+
+    public function access(Orders $orders, OrderItems $orderitems): Response
+    {
+        return ($orders->id === $orderitems->order_id)
+            ? Response::allow()
+            : Response::deny('You can not access to this orderitem');
+    }
+
+}
