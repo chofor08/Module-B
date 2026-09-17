@@ -13,7 +13,7 @@ class Items extends Model
     use HasFactory;
 
     public function order_item(): HasMany {
-        return $this->hasMany(OrderItems::class, 'user_id');
+        return $this->hasMany(OrderItems::class, 'item_id');
     }
 
 }

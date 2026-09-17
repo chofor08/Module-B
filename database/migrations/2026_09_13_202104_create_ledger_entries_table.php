@@ -13,6 +13,7 @@ return new class extends Migration
     {
         Schema::create('ledger_entries', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->decimal('payment', 8, 2);
             $table->decimal('refund', 8, 2);
             $table->decimal('adjustment', 8, 2);

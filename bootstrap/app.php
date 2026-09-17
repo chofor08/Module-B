@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\EnsureIdempotency;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -25,6 +27,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'verified' => \App\Http\Middleware\EnsureEmailIsVerified::class,
             'pretty_json' => prettyJson::class,
+            'idempotency' => EnsureIdempotency::class,
         ]);
 
         $middleware->preventRequestForgery(except: [

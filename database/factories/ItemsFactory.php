@@ -19,7 +19,7 @@ class ItemsFactory extends Factory
     {
         return [
             'name' => fake()->word(),
-            'unit_price' => fake()->randomFloat(2, 1000, 10000),
+            'unit_price' => fake()->randomFloat(2, 100, 1000),
         ];
     }
 }

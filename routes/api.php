@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ItemsController;
+use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\APi\OrderManagementController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -11,15 +12,16 @@ Route::middleware(['auth:sanctum'])->get('/user', function (Request $request) {
 
 require __DIR__.'/auth.php';
 
-// Items Routes
+// View items route
 Route::get('/items', [ItemsController::class, 'index']);
-Route::post('/checkout', [ItemsController::class, 'checkout']);
-Route::get('/success', [ItemsController::class, 'success'])->name('checkout.success');
-Route::get('/cancel', [ItemsController::class, 'cancel'])->name('checkout.cancel');
 
-// OrderItems Routes
+// Order management routes
 Route::middleware('auth:sanctum')->group(function() {
-    Route::get('/order', [OrderManagementController::class, 'index']);
-    Route::post('/order', [OrderManagementController::class, 'store']);
+    Route::post('/checkout', [OrderManagementController::class, 'checkout'])->middleware('idempotency');
+    Route::get('/webhook', [OrderManagementController::class, 'webhook'])->name('checkout.webhook');
+    Route::get('/order_items', [OrderManagementController::class, 'index']);
+    Route::get('/orders', [OrderManagementController::class, 'reciept']);
 });
 
+    Route::get('/success', [OrderManagementController::class, 'success'])->name('checkout.success');
+    Route::get('/cancel', [OrderManagementController::class, 'cancel'])->name('checkout.cancel');
