@@ -13,7 +13,10 @@
         "laravel/framework": "^13.17",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
-        "stripe/stripe-php": "*"
+        "resend/resend-laravel": "*",
+        "stripe/stripe-php": "*",
+        "symfony/http-client": "*",
+        "symfony/postmark-mailer": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

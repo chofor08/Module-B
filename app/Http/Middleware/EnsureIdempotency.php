@@ -40,10 +40,11 @@ class EnsureIdempotency
 
             if ($existing && $existing->status === 'completed') {
                 // Return the original response, don't reprocess
-                return response()->json(
-                    $existing->response_body,
-                    $existing->response_status
-                );
+                return response()->json([
+                    "Info" => $existing->response_body,
+                    "Error" => "Order already exist",
+                    ],$existing->response_status
+                )->setEncodingOptions(JSON_UNESCAPED_SLASHES);
             }
 
             if ($existing && $existing->status === 'processing') {
@@ -58,8 +59,18 @@ class EnsureIdempotency
             $record = $existing;
         }
 
-        // Let the actual controller run
-        $response = $next($request);
+        try {
+            // Let the actual controller run
+            $response = $next($request);
+        } catch (\Throwable $e) {
+            $record->update([
+                'status' => 'failed',
+                'response_status' => 500,
+                'response_body' => ['message' => 'Internal server error.'],
+            ]);
+
+            throw $e; // re-throw so Laravel's normal exception handling still applies
+        }
 
         // Save the response against the key so retries get the same result
         $record->update([
@@ -70,7 +81,6 @@ class EnsureIdempotency
 
         return response()->json([
             'Order' => $response,
-            'Message' => "Order already exist",
-        ]);
+        ])->setEncodingOptions(JSON_UNESCAPED_SLASHES);
     }
 }

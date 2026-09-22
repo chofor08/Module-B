@@ -12,6 +12,7 @@ class Items extends Model
     /** @use HasFactory<\Database\Factories\ItemsFactory> */
     use HasFactory;
 
+    protected $fillable = ['quantity'];
     public function order_item(): HasMany {
         return $this->hasMany(OrderItems::class, 'item_id');
     }

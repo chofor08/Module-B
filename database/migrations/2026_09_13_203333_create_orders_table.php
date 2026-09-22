@@ -15,6 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('session_id')->nullable()->unique();
+            $table->string('payment_intent_id')->nullable()->unique();
             $table->string('status');
             $table->string('total_price');
             $table->timestamps();
