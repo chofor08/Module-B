@@ -46,7 +46,7 @@ class PaymentConfirmed extends Mailable
             view: 'emails.payment-confirmed',
             with: [
                 'userName' => $user->name,
-                'amount'   => number_format($this->order->total_price, 2),
+                'amount'   => number_format($this->order->amount, 2),
                 'currency' => strtoupper($this->currency),
                 'orderId'  => $this->order->id,
                 'txnId'    => $this->order->payment_intent_id,

@@ -14,9 +14,7 @@
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
         "resend/resend-laravel": "*",
-        "stripe/stripe-php": "*",
-        "symfony/http-client": "*",
-        "symfony/postmark-mailer": "*"
+        "stripe/stripe-php": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

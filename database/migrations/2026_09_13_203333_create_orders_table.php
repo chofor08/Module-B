@@ -18,10 +18,10 @@ return new class extends Migration
             $table->string('refund_id')->nullable()->unique();
             $table->string('payment_intent_id')->nullable()->unique();
             $table->string('status');
-            $table->string('total_price');
+            $table->decimal('amount');
             $table->timestamps();
 
-            $table->index(['user_id', 'status']);
+            $table->index(['user_id', 'session_id', 'payment_intent_id']);
         });
     }
 

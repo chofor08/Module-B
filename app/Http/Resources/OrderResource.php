@@ -20,7 +20,7 @@ class OrderResource extends JsonResource
             'refund_id' => $this->refund_id,
             'payment_intent_id' => $this->payment_intent_id,
             'status' => $this->status,
-            'total_price' => $this->total_price,
+            'amount' => $this->amount,
             'created_at' => $this->created_at->format('Y-m-d H:i:s'),
             'updated_at' => $this->updated_at->format('Y-m-d H:i:s'),
             'user' => new UserResource($this->user),

@@ -1,59 +1,110 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Module B — Order & Payment Service
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Module B owns the order lifecycle: creating orders, tracking payment status, and notifying customers by email when an order is paid or refunded. It depends on Module A for product/stock data and emits a signal that Module C consumes when an order is paid.
 
-## About Laravel
+## Table of contents
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- [What Module B expects from Module A (Inventory)](#what-module-b-expects-from-module-a-inventory)
+- [Order status](#order-status)
+- [The "order paid" signal (for Module C)](#the-order-paid-signal-for-module-c)
+- [Refunds](#refunds)
+- [Getting started](#getting-started)
+- [Environment configuration](#environment-configuration)
+- [Migrations](#migrations)
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## What Module B expects from Module A (Inventory)
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Module B does not own product or stock data. Before an order can be created, Module B needs Module A to provide:
 
-## Learning Laravel
+- **Purchasable items (products)** — id, name, price, and current status (active/inactive).
+- **Available quantity per item** — the quantity Module A is willing to sell right now, i.e. after existing reservations/holds are accounted for.
+- **An availability/reservation check** — given a product id and a requested quantity, Module A must confirm whether that quantity can be reserved for the order *before* Module B marks the order as created, and reserve it (decrement available quantity) so two orders can't both claim the last unit.
+- **A release mechanism** — if an order is cancelled or expires unpaid, Module A must release the reserved quantity back into available stock.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+Until Module A exposes this (as an internal API, service class, or event contract), Module B cannot safely place orders — the quantity check has to happen at the inventory boundary, not be assumed by Module B.
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Order status
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+Each order in Module B moves through one of the following statuses:
 
-## Agentic Development
+| Status     | Meaning                                                              |
+|------------|-----------------------------------------------------------------------|
+| `unpaid`   | Order created, stock reserved via Module A, awaiting payment.        |
+| `paid`     | Payment confirmed. Confirmation email sent. `order.paid` signal fired. |
+| `refunded` | Payment reversed. Confirmation email sent. Stock release handled via Module A. |
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+Confirmation emails are sent to the customer on the `unpaid → paid` and `paid → refunded` transitions.
 
-```bash
-composer require laravel/boost --dev
+## The "order paid" signal (for Module C)
 
-php artisan boost:install
+When an order transitions to `paid`, Module B emits a signal that Module C listens for. Module C should treat this as the single source of truth for "this order is now paid" — it should not infer payment status by polling Module B's tables directly.
+
+**Payload:**
+
+```json
+{
+  // "event": "order.paid",
+  // "order_id": 123,
+  // "paid_at": "2026-09-25T10:15:00Z",
+  // "customer": {
+  //   "id": 45,
+  //   "email": "customer@example.com"
+  // },
+  // "items": [
+  //   { "product_id": 7, "quantity": 2, "unit_price": 1500 }
+  // ],
+  // "total": 3000,
+  // "currency": "XAF"
+}
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+- `order_id` — Module B's order identifier, use this to correlate with future signals (e.g. `order.refunded`).
+- `items` — the product ids and quantities that were paid for, so Module C doesn't need to call back into Module B for line items.
+- `total` / `currency` — the amount actually paid.
 
-## Contributing
+The exact transport (Laravel event, queued job, webhook, etc.) is an implementation detail Module B is free to choose, but the payload shape above is the contract Module C should be able to rely on.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Refunds
 
-## Code of Conduct
+When an order is refunded, Module B:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+1. Updates the order status to `refunded`.
+2. Sends a refund confirmation email to the customer.
+3. Notifies Module A to release the reserved quantity back to available stock.
 
-## Security Vulnerabilities
+A corresponding `order.refunded` signal (same shape as `order.paid`, with a `refunded_at` timestamp) should be emitted for Module C if it needs to react to refunds as well.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## Getting started
 
-## License
+If you're cloning this repo for the first time:
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
-# Module-B
+```bash
+git clone <repo-url>
+cd <project-directory>
+
+# Copy the environment file
+cp .env.example .env
+
+# Install PHP dependencies
+composer install
+
+# Generate the application key
+php artisan key:generate
+
+# Run database migrations
+php artisan migrate
+
+# Start the local dev server
+php artisan serve
+```
+
+## Environment configuration
+
+- Copy `.env.example` to `.env` before running anything — the app will not boot without it.
+- Set your database credentials (`DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`) in `.env` to match your local setup.
+- Set mail credentials (`MAIL_MAILER`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS`) so payment/refund confirmation emails can actually send — without this, orders will still transition status, but email dispatch will fail or silently no-op depending on your mailer driver.
+- Run `php artisan key:generate` after copying `.env.example` — this sets `APP_KEY`, which Laravel requires for encryption. Skipping this step throws a `MissingAppKeyException`.
+
+## Migrations
+
+Run `php artisan migrate` after setup to create the orders and related tables. If you pull changes that include new migrations later, re-run `php artisan migrate` to bring your local schema up to date. Use `php artisan migrate:fresh` if you need to drop all tables and start clean (development only — this destroys data).

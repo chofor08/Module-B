@@ -50,7 +50,7 @@ class RefundConfirmed extends Mailable
                 'refundAmount'  => number_format($this->refundAmount, 2),
                 'currency'      => strtoupper($this->currency),
                 'orderId'       => $this->order->id,
-                'txnId'         => $this->order->payment_intent_id,
+                'refundId'      => $this->order->refund_id,
                 'date'          => now()->format('F j, Y, g:i a'),
                 'reason'        => $this->reason,
                 ],

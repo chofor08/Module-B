@@ -50,8 +50,8 @@
                                     <td style="text-align:right; color:#111827;">#{{ $orderId }}</td>
                                 </tr>
                                 <tr>
-                                    <td style="color:#6b7280;">Transaction ID</td>
-                                    <td style="text-align:right; color:#111827;">{{ $txnId }}</td>
+                                    <td style="color:#6b7280;">Refund ID</td>
+                                    <td style="text-align:right; color:#111827;">{{ $refundId }}</td>
                                 </tr>
                                 <tr>
                                     <td style="color:#6b7280;">Date Processed</td>

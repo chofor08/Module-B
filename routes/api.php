@@ -1,8 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\ItemsController;
-use App\Http\Controllers\Api\LedgerEntriesController;
-use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\APi\OrderManagementController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -29,5 +27,5 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::post('/webhook', [OrderManagementController::class, 'webhook'])->name('checkout.webhook');
     Route::get('/cancel', [OrderManagementController::class, 'cancel'])->name('checkout.cancel');
 
-    // Ledger entry routes
-    Route::get('/ledger', [LedgerEntriesController::class, 'ledger']);
+    // Sales summary routes
+    Route::get('/sales_summary', [OrderManagementController::class, 'sales_summary']);

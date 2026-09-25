@@ -14,12 +14,10 @@ use App\Models\OrderItems;
 use App\Models\Orders;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
-use Stripe\Event;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\StripeClient;
 use Stripe\Webhook;
@@ -113,7 +111,7 @@ class OrderManagementController extends Controller
         $order = Orders::create([
             'user_id' => $request->user()->id,
             'status' => 'unpaid',
-            'total_price' => $total,
+            'amount' => $total,
         ]);
 
         // update orderitems' user_id
@@ -194,7 +192,7 @@ class OrderManagementController extends Controller
                 Orders::where('id', $session->metadata->order_id)->delete();
                 IdempotencyKey::where('user_id', $session->metadata->user_id)->orderBy('id', 'desc')->first()->delete();
                 return response()->json([
-                    'Error' => 'Set up local listener and try again. '
+                    'Error' => 'Payment failed, try again. '
                 ]);
             }
 
@@ -254,8 +252,8 @@ class OrderManagementController extends Controller
             $adjustment = $last_entry->adjustment ?? 0;
 
             if($order->status === 'paid'){
-                $payment += $order->total_price;
-                $adjustment += $order->total_price;
+                $payment += $order->amount;
+                $adjustment += $order->amount;
             }
 
             $ledger_entry = new LedgerEntries();
@@ -265,22 +263,31 @@ class OrderManagementController extends Controller
             $ledger_entry->adjustment = $adjustment;
             $ledger_entry->save();
 
+            break;
+
+        case 'charge.updated':
+            $payment = $event->data->object;
+            $order = Orders::where('payment_intent_id', $payment->payment_intent)->first();
+            $paymentMethodLabel = $payment->payment_method_details->card->brand;
+
             //send email confirming payment
-            $currency = $event->data->object->currency;
-            $paymentMethodLabel = 'visa';
-            Mail::to($order->user)->queue(
-                new PaymentConfirmed($order, $currency, $paymentMethodLabel)
-            );
+            if($order && $order->status === 'paid'){
+                $currency = $payment->currency;
+                Mail::to($order->user)->queue(
+                    new PaymentConfirmed($order, $currency, $paymentMethodLabel)
+                );
+            }
 
             break;
 
         case 'charge.refunded':
-            $order = Orders::where('payment_intent_id', $event->data->object->payment_intent)->first();
+            $charge = $event->data->object;
+            $order = Orders::where('payment_intent_id', $charge->payment_intent)->first();
 
             // ---------------------update order to refunded status--------------------
             $order->update([
                 'status' => 'refunded',
-                'refund_id' => $event->data->object->id,
+                'refund_id' => $charge->id,
                 ]);
 
             // ---------------------Reverse ledger entry -----------------------
@@ -290,8 +297,8 @@ class OrderManagementController extends Controller
             $adjustment = $last_entry->adjustment ?? 0;
 
             if($order->status === 'refunded'){
-                $refund += $order->total_price;
-                $adjustment -= $order->total_price;
+                $refund += $order->amount;
+                $adjustment -= $order->amount;
             }
 
             $ledger_entry = new LedgerEntries();
@@ -321,12 +328,6 @@ class OrderManagementController extends Controller
                 new RefundConfirmed($order, $currency, $refundAmount)
             );
 
-            break;
-
-        case 'charge.succeeded':
-            $order = Orders::where('payment_intent_id', $event->data->object->payment_intent)->first();
-            $payment_method = $event->data->object->payment_method_details->card->brand;
-            // $order->update(['payment_method' => $payment_method]);
             break;
 
         default:
@@ -361,7 +362,7 @@ class OrderManagementController extends Controller
         $order->save();
 
         return response()->json([
-            'Info' => "Refund of $order->total_price was successfully completed.",
+            'Info' => "Refund of $order->amount was successfully completed.",
             'Message' => "Refund Id: $refund->id"
         ]);
 
@@ -371,4 +372,38 @@ class OrderManagementController extends Controller
             ],500)->setEncodingOptions(JSON_UNESCAPED_SLASHES);
         }
     }
+    public function sales_summary()
+    {
+        try {
+            $userIds = User::pluck('id');
+            $total_amount = 0;
+            $total_refund = 0;
+            $adjustment = 0;
+            $orders = 0;
+
+            foreach($userIds as $userId){
+                $ledger_entries = LedgerEntries::where('user_id', $userId)->orderBy('id', 'desc')->first();
+                $orders += Orders::where('user_id', $userId)->get()->count();
+
+                $last_entry = collect($ledger_entries);
+                $total_amount += $last_entry['payment'];
+                $total_refund += $last_entry['refund'];
+                $adjustment += $last_entry['adjustment'];
+            }
+
+
+            return response()->json([
+                'Number of Orders' => $orders,
+                'Amount Payed' => round($total_amount, 2),
+                'Amount Refunded' => round($total_refund, 2),
+                'Amount Collected' => round($adjustment, 2),
+            ]);
+
+        } catch (\ErrorException $e) {
+            return response()->json([
+                "erroe" => $e->getMessage(),
+            ]);
+        }
+    }
+
 }
