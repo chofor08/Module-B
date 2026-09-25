@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['user_id', 'session_id', 'payment_intent_id', 'status', 'total_price'])]
+#[Fillable(['user_id', 'session_id', 'refund_id' , 'payment_intent_id', 'status', 'total_price'])]
 class Orders extends Model
 {
     public function user(): BelongsTo {

@@ -19,7 +19,6 @@ Route::get('/items', [ItemsController::class, 'index']);
 // Order management routes
 Route::middleware('auth:sanctum')->group(function() {
     Route::post('/checkout', [OrderManagementController::class, 'checkout'])->middleware('idempotency');
-    Route::post('/orders', [OrderManagementController::class, 'store'])->middleware('idempotency');
     Route::post('/refund', [OrderManagementController::class, 'refund']);
     Route::get('/order_items', [OrderManagementController::class, 'index']);
     Route::get('/orders', [OrderManagementController::class, 'reciept']);

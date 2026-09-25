@@ -18,6 +18,7 @@ class ItemsResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'unit_price' => $this->unit_price,
+            'quantity' => $this->quantity,
             'created_at' => $this->created_at->format('Y-m-d H:i:s'),
             'updated_at' => $this->updated_at->format('Y-m-d H:i:s'),
         ];

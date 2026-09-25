@@ -5,6 +5,9 @@ namespace App\Http\Controllers\APi;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\OrderItemsResource;
 use App\Http\Resources\OrderResource;
+use App\Mail\PaymentConfirmed;
+use App\Mail\RefundConfirmed;
+use App\Models\IdempotencyKey;
 use App\Models\Items;
 use App\Models\LedgerEntries;
 use App\Models\OrderItems;
@@ -14,6 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
 use Stripe\Event;
 use Stripe\Exception\SignatureVerificationException;
@@ -52,73 +56,6 @@ class OrderManagementController extends Controller
             'Orders' => OrderResource::collection($orders),
         ]);
     }
-
-
-    public function store(Request $request)
-    {
-
-        DB::beginTransaction();
-        //Get all ids from Item to validate request
-        $valid_ids = Items::pluck('id');
-
-        //Validate the array, not single fields
-        $validated = $request->validate([
-            'order_items' => ['required', 'array', 'min:1'],
-            'order_items.*.item_id' => ['required', 'integer', 'min:0', Rule::in($valid_ids)],
-            'order_items.*.quantity' => ['required', 'integer', 'min:0'],
-        ]);
-
-
-        //Create the order
-        $order = Auth::user();
-        $order = Orders::create([
-            'user_id' => $request->user()->id,
-            'status' => 'pending',
-            'total_price' => 0,
-
-        ]);
-
-        // Loop through the orderitems array to create all orderitems
-        $total = 0;
-        foreach ($validated['order_items'] as $order_item){
-            $item = Items::find($order_item['item_id']);
-
-            // check if theirs enough of the item available
-            if($order_item['quantity'] > $item->quantity){
-                DB::rollBack();
-                return response()->json([
-                    "Error" => "Insufficient quantity available",
-                    "Message" => "The amount of $item->name purchaseable: $item->quantity"
-                    ], 400);
-            }
-
-            // update the item instance with new quantity in stock
-            $new_quantity = $item->quantity - $order_item['quantity'];
-            $item->update(['quantity' => $new_quantity]);
-
-            $sub_total = $order_item['quantity'] * $item->unit_price;
-            $total += $sub_total;
-
-            $data = OrderItems::create([
-                'order_id' => $order->id,
-                'item_id' => $item->id,
-                'quantity' => $order_item['quantity'],
-                'unit_price' => $item->unit_price,
-                'sub_total' => $sub_total,
-            ]);
-
-        }
-
-        //update total
-        $order->update(['total_price' => $total]);
-
-        DB::commit();
-        return response()->json([
-            'Order' => new OrderResource($order),
-        ]);
-
-    }
-
 
     public function checkout(Request $request)
     {
@@ -208,6 +145,7 @@ class OrderManagementController extends Controller
             'line_items' => $lineItems,
             'metadata' => [
                 'order_id' => $order->id,
+                'user_id' => $order->user_id,
             ],
             'mode' => 'payment',
             'success_url' => route('checkout.success'). "?session_id={CHECKOUT_SESSION_ID}",
@@ -243,16 +181,25 @@ class OrderManagementController extends Controller
             $session = $stripe->checkout->sessions->retrieve($session_id);
             $customerName = $session->customer_details->name ?? 'Customer';
 
-            $order = Orders::where('session_id', $session_id)->first();
+            $order = Orders::find($session->metadata->order_id);
             if (!$order) {
-            return response()->json([
-                'status code' => 400,
-                'message' => 'Invalid Order.',
-            ], 400);
+                return response()->json([
+                    'status code' => 400,
+                    'message' => 'Not Found.',
+                ], 400);
+            }
+
+            if(!($order->session_id) && !($order->payment_intent_id)){
+                OrderItems::where('order_id', $session->metadata->order_id)->delete();
+                Orders::where('id', $session->metadata->order_id)->delete();
+                IdempotencyKey::where('user_id', $session->metadata->user_id)->orderBy('id', 'desc')->first()->delete();
+                return response()->json([
+                    'Error' => 'Set up local listener and try again. '
+                ]);
             }
 
             if($order->status === 'unpaid'){
-                return response()->json("Thanks for your order, $customerName!", 200);
+                return response()->json("Thanks for your orders, $customerName!", 200);
             }
 
             return response()->json("Thanks for your order, $customerName!", 200);
@@ -318,7 +265,68 @@ class OrderManagementController extends Controller
             $ledger_entry->adjustment = $adjustment;
             $ledger_entry->save();
 
-            //send email/notification
+            //send email confirming payment
+            $currency = $event->data->object->currency;
+            $paymentMethodLabel = 'visa';
+            Mail::to($order->user)->queue(
+                new PaymentConfirmed($order, $currency, $paymentMethodLabel)
+            );
+
+            break;
+
+        case 'charge.refunded':
+            $order = Orders::where('payment_intent_id', $event->data->object->payment_intent)->first();
+
+            // ---------------------update order to refunded status--------------------
+            $order->update([
+                'status' => 'refunded',
+                'refund_id' => $event->data->object->id,
+                ]);
+
+            // ---------------------Reverse ledger entry -----------------------
+
+            $last_entry = LedgerEntries::where('user_id', $order->user_id)->orderBy('id', 'desc')->first();
+            $refund = $last_entry->refund ?? 0;
+            $adjustment = $last_entry->adjustment ?? 0;
+
+            if($order->status === 'refunded'){
+                $refund += $order->total_price;
+                $adjustment -= $order->total_price;
+            }
+
+            $ledger_entry = new LedgerEntries();
+            $ledger_entry->user_id = $order->user_id;
+            $ledger_entry->payment = $last_entry->payment ?? 0;
+            $ledger_entry->refund = $refund;
+            $ledger_entry->adjustment = $adjustment;
+            $ledger_entry->save();
+
+            // -------------------- Re-stock items with the refunded order---------------------
+            $order_items = OrderItems::where('order_id', $order->id)->get();
+            foreach($order_items as $order_item){
+
+                $item = Items::find($order_item->item_id);
+
+                // update the item instance with new quantity in stock
+                $new_quantity = $item->quantity + $order_item->quantity;
+                $item->update(['quantity' => $new_quantity]);
+            }
+
+            // send email
+            $charge = $event->data->object;
+            $currency = $charge->currency;
+            $refundAmount = $charge->amount_refunded / 100; // Stripe amounts are in cents
+
+            Mail::to($order->user)->queue(
+                new RefundConfirmed($order, $currency, $refundAmount)
+            );
+
+            break;
+
+        case 'charge.succeeded':
+            $order = Orders::where('payment_intent_id', $event->data->object->payment_intent)->first();
+            $payment_method = $event->data->object->payment_method_details->card->brand;
+            // $order->update(['payment_method' => $payment_method]);
             break;
 
         default:
@@ -340,64 +348,24 @@ class OrderManagementController extends Controller
         // Order for refund payment
         $order = Orders::find($validated['id']);
 
-        // check if order is paid
-        if($order->status !== 'paid'){
+        if($order->user_id !== Auth::id()){
             return response()->json([
-                'error' => 'you can not get a refund'
-            ], 400);
+                'error' => 'access denied',
+            ], 403);
         }
 
         try {
         // refund the order
         $stripe = new StripeClient(config('services.stripe.secret'));
-        // $refund = $stripe->refunds->create(['payment_intent' => 'pi_Aabcxyz01aDfoo']);
         $refund = $stripe->refunds->create(['payment_intent' => $order->payment_intent_id]);
+        $order->save();
 
-        // check if refund was sucessfull
-        if(!$refund){
-            return response()->json([
-                "Error" => "Refund was unsucessfull"
-            ]);
-        }
+        return response()->json([
+            'Info' => "Refund of $order->total_price was successfully completed.",
+            'Message' => "Refund Id: $refund->id"
+        ]);
 
-        DB::beginTransaction();
-            // ---------------------update order to refunded status--------------------
-            $order->update(['status' => 'refunded']);
-
-            // ---------------------Reverse ledger entry -----------------------
-
-            $last_entry = LedgerEntries::where('user_id', $validated['id'])->orderBy('id', 'desc')->first();
-            $refund = $last_entry->refund ?? 0;
-            $adjustment = $last_entry->adjustment ?? 0;
-
-            if($order->status === 'refunded'){
-                $refund += $order->total_price;
-                $adjustment -= $order->total_price;
-            }
-
-            $ledger_entry = new LedgerEntries();
-            $ledger_entry->user_id = $validated['id'];
-            $ledger_entry->payment = $last_entry->payment ?? 0;
-            $ledger_entry->refund = $refund;
-            $ledger_entry->adjustment = $adjustment;
-            $ledger_entry->save();
-
-            // -------------------- Re-stock items with the refunded order---------------------
-            $order_items = OrderItems::where('order_id', $order->id)->get();
-            foreach($order_items as $order_item){
-
-                $item = Items::find($order_item->item_id);
-
-                // update the item instance with new quantity in stock
-                $new_quantity = $item->quantity + $order_item->quantity;
-                $item->update(['quantity' => $new_quantity]);
-            }
-
-            DB::commit();
-            return response()->noContent();
-
-        } catch (\Stripe\Exception\ApiConnectionException $e) {
-            DB::rollBack();
+        } catch (\Throwable $e) {
             return response()->json([
                 'error' => $e->getMessage(),
             ],500)->setEncodingOptions(JSON_UNESCAPED_SLASHES);

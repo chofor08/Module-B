@@ -32,7 +32,7 @@ class LedgerEntriesController extends Controller
 
             return response()->json([
                 'Ledger' => LegderEntriesResource::collection($ledger_entries),
-                'Amount Collected' => $total_amount,
+                'Amount Collected' => round($total_amount, 2),
             ]);
 
         } catch (\ErrorException $e) {
